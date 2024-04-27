@@ -1,6 +1,6 @@
 // MIT License
 //
-// Copyright (c) 2021-2023 Brenden Davidson
+// Copyright (c) 2021-2024 Brenden Davidson
 //
 // Permission is hereby granted, free of charge, to any person obtaining a copy
 // of this software and associated documentation files (the "Software"), to deal
@@ -109,7 +109,7 @@ fn trim_after_null(s: &str) -> String {
     trimmed
 }
 
-fn bytes_to_string(bytes: &Vec<u8>, read_pos: usize, read_len: usize) -> String {
+fn bytes_to_string(bytes: &[u8], read_pos: usize, read_len: usize) -> String {
     let range = read_pos..(read_pos + read_len);
 
     let chunk = &bytes[range];
@@ -197,7 +197,7 @@ impl BiosInfo {
 
         let build_date = bytes_to_string(&info_chunk, DATE_OFFSET, DATE_LEN);
         let build_date =
-            NaiveDate::parse_from_str(&build_date, "%m/%d/%Y").unwrap_or(NaiveDate::default());
+            NaiveDate::parse_from_str(&build_date, "%m/%d/%Y").unwrap_or_default();
 
         let build_number = bytes_to_string(&info_chunk, BUILD_NUMBER_OFFSET, BUILD_NUMBER_LEN);
         let cap_name = bytes_to_string(&info_chunk, CAP_NAME_OFFSET, CAP_NAME_LEN);

@@ -1,0 +1,8 @@
+[Desktop Entry]
+Name=BIOS Renamer
+Comment=BIOS renamer for ASUS motherboards
+Type=Application
+Exec=rename-bios-gui
+Terminal=false
+Categories=Utility;GTK;
+StartupNotify=true

@@ -1,0 +1,49 @@
+id: 'dev.bdavidson.BiosRenamer'
+runtime: 'org.gnome.Platform'
+runtime-version: '45'
+sdk: 'org.gnome.Sdk'
+command: 'rename-bios-gui'
+finish-args:
+  - "--share=ipc"
+  - "--socket=wayland"
+  - "--socket=fallback-x11"
+  - "--device=dri"
+add-build-extensions:
+  org.freedesktop.Sdk.Extension.rust-stable:
+    version: '23.08'
+    directory: 'lib/sdk/rust-stable'
+  org.freedesktop.Sdk.Extension.llvm16:
+    version: '23.08'
+    directory: 'lib/sdk/llvm16'
+build-options:
+  append-path: '/usr/lib/sdk/rust-stable/bin:/usr/lib/sdk/llvm16/bin'
+  env:
+    CARGO_HOME: '/run/build/BiosRenamer/cargo'
+    CARGO_TARGET_X86_64_UNKNOWN_LINUX_GNU_LINKER: 'clang'
+    CARGO_TARGET_X86_64_UNKNOWN_LINUX_GNU_RUSTFLAGS: '-C link-arg=-fuse-ld=/usr/lib/sdk/rust-stable/bin/mold'
+    CARGO_TARGET_AARCH64_UNKNOWN_LINUX_GNU_LINKER: 'clang'
+    CARGO_TARGET_AARCH64_UNKNOWN_LINUX_GNU_RUSTFLAGS: '-C link-arg=-fuse-ld=/usr/lib/sdk/rust-stable/bin/mold'
+modules:
+  - name: 'BiosRenamer'
+    buildsystem: 'simple'
+    build-commands:
+      - "cargo --offline fetch --manifest-path Cargo.toml --verbose"
+      - "cargo --offline build --features=\"gui\" --bin rename-bios-gui --release --verbose"
+      - "install -Dm755 ./target/release/rename-bios-gui -t /app/bin/"
+      - "install -Dm644 ./data/${FLATPAK_ID}.desktop -t /app/share/applications/"
+    sources:
+      - type: "file"
+        path: "Cargo.toml"
+
+      - type: "file"
+        path: "Cargo.lock"
+
+      - type: "dir"
+        path: "data/"
+        dest: "data/"
+
+      - type: "dir"
+        path: "src/"
+        dest: "src/"
+
+      - "cargo-sources.yml"

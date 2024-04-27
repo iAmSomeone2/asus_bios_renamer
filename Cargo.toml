@@ -1,8 +1,9 @@
 [package]
 name = "bios_renamer_for_asus"
-version = "0.2.2"
+version = "0.3.0"
 authors = ["Brenden Davidson <davidson.brenden15@gmail.com>"]
 edition = "2021"
+rust-version = "1.77.0"
 license = "MIT"
 readme = "README.md"
 repository = "https://github.com/iAmSomeone2/bios_renamer_for_asus"
@@ -10,11 +11,28 @@ keywords = ["bios", "rename", "asus"]
 categories = ["command-line-utilities"]
 
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
+[[bin]]
+name = "rename-bios"
+path = "src/main.rs"
+required-features = ["cli"]
+
+[[bin]]
+name = "rename-bios-gui"
+path = "src/gui/mod.rs"
+required-features = ["gui"]
 
 [profile.release]
 opt-level = 3
 lto = true
+strip = true
 
 [dependencies]
-chrono = "0.4.31"
-clap = { version = "4.4.8", features = ["derive"] }
+anyhow = "1.0.82"
+chrono = "0.4.38"
+clap = { version = "4.5.4", features = ["derive"], optional = true }
+relm4 = { version = "0.8.1", features = [ "libadwaita", "gnome_45"], optional = true }
+
+[features]
+default = ["cli"]
+cli = ["dep:clap"]
+gui = ["dep:relm4"]

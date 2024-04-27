@@ -2,4 +2,8 @@
 /target
 /*-*-*-*-*-ASUS-*
 Cargo.lock
+cargo-sources.yml
 *.bin
+**/.venv/
+flatpak-build/
+.flatpak-builder/

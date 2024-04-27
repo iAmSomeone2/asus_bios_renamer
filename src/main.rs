@@ -1,6 +1,6 @@
 // MIT License
 //
-// Copyright (c) 2021-2023 Brenden Davidson
+// Copyright (c) 2021-2024 Brenden Davidson
 //
 // Permission is hereby granted, free of charge, to any person obtaining a copy
 // of this software and associated documentation files (the "Software"), to deal
@@ -23,7 +23,6 @@
 use clap::{ArgAction, Parser};
 use std::fs::File;
 use std::path::PathBuf;
-use std::process::ExitCode;
 
 mod bios;
 
@@ -47,46 +46,21 @@ struct Cli {
     hide_details: bool,
 }
 
-fn main() -> ExitCode {
+fn main() -> anyhow::Result<()> {
     let cli = Cli::parse();
 
-    let bios_path = match cli.bios_path.canonicalize() {
-        Ok(path) => path,
-        Err(why) => {
-            eprintln!("ERROR: {} at path {}", why, cli.bios_path.display());
-            return ExitCode::FAILURE;
-        }
-    };
+    let bios_path = cli.bios_path.canonicalize()?;
 
-    let mut bios_file = match File::open(&bios_path) {
-        Ok(file) => file,
-        Err(why) => {
-            eprintln!("ERROR: couldn't open {}: {}", &cli.bios_path.display(), why);
-            return ExitCode::FAILURE;
-        }
-    };
+    let mut bios_file = File::open(&bios_path)?;
 
     // Check file validity
-    let is_valid = match bios::is_file_valid(&bios_file) {
-        Ok(is_valid) => is_valid,
-        Err(why) => {
-            eprintln!("ERROR: failed to test validity of file: {}", why);
-            return ExitCode::FAILURE;
-        }
-    };
+    let is_valid = bios::is_file_valid(&bios_file)?;
 
     if !is_valid {
-        eprintln!("INVALID PATH: provided path does not point to a file");
-        return ExitCode::FAILURE;
+        return Err(anyhow::Error::msg("INVALID PATH: provided path does not point to a file"));
     }
 
-    let bios_info = match bios::BiosInfo::from_file(&mut bios_file) {
-        Ok(info) => info,
-        Err(why) => {
-            eprintln!("ERROR: {}", why);
-            return ExitCode::FAILURE;
-        }
-    };
+    let bios_info = bios::BiosInfo::from_file(&mut bios_file)?;
     // Close the file by dropping it
     drop(bios_file);
 
@@ -100,11 +74,9 @@ fn main() -> ExitCode {
             out
         }
     };
-    match cli.out_dir {
-        Some(dir) => {
-            output_path = dir;
-        }
-        None => {}
+
+    if let Some(dir) = cli.out_dir {
+        output_path = dir;
     }
 
     // Print file info
@@ -124,8 +96,8 @@ fn main() -> ExitCode {
                 println!("BIOS file copied to: {}", &output_path.display());
             }
             Err(why) => {
-                eprintln!("ERROR: Failed to copy file: {}", why);
-                return ExitCode::FAILURE;
+                let err_msg = format!("ERROR: Failed to copy file: {}", why);
+                return Err(anyhow::Error::msg(err_msg));
             }
         };
     } else {
@@ -135,11 +107,11 @@ fn main() -> ExitCode {
                 println!("BIOS file moved to: {}", &output_path.display());
             }
             Err(why) => {
-                eprintln!("ERROR: Failed to move file: {}", why);
-                return ExitCode::FAILURE;
+                let err_msg = format!("ERROR: Failed to move file: {}", why);
+                return Err(anyhow::Error::msg(err_msg));
             }
         };
     }
 
-    ExitCode::SUCCESS
+    Ok(())
 }
