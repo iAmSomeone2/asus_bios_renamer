@@ -30,7 +30,7 @@ strip = true
 anyhow = "1.0.82"
 chrono = "0.4.38"
 clap = { version = "4.5.4", features = ["derive"], optional = true }
-relm4 = { version = "0.8.1", features = [ "libadwaita", "gnome_46"], optional = true }
+relm4 = { version = "0.8.1", default-features = false, features = ["macros", "libadwaita", "gnome_46"], optional = true }
 
 [features]
 default = ["cli"]

@@ -1,13 +1,39 @@
-use crate::bios::BiosInfo;
+// MIT License
+//
+// Copyright (c) 2021-2024 Brenden Davidson
+//
+// Permission is hereby granted, free of charge, to any person obtaining a copy
+// of this software and associated documentation files (the "Software"), to deal
+// in the Software without restriction, including without limitation the rights
+// to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+// copies of the Software, and to permit persons to whom the Software is
+// furnished to do so, subject to the following conditions:
+//
+// The above copyright notice and this permission notice shall be included in all
+// copies or substantial portions of the Software.
+//
+// THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+// IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+// FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+// AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+// LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+// OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+// SOFTWARE.
+
 use adw::prelude::*;
 use relm4::adw::gio;
 use relm4::prelude::*;
+use relm4::MessageBroker;
 use std::fmt::Display;
 use std::fs;
 use std::fs::File;
 use std::path::PathBuf;
 
+use crate::bios::BiosInfo;
+use crate::bios_info_view::BiosInfoView;
+
 mod bios;
+mod bios_info_view;
 
 const APP_ID: &str = "dev.bdavidson.BiosRenamer";
 
@@ -17,14 +43,24 @@ enum AppInput {
     CopyAndRename,
 }
 
+#[derive(Debug)]
+pub enum InfoState {
+    BiosInfoUpdated(Option<BiosInfo>),
+}
+
 struct App {
     input_path: Option<PathBuf>,
     bios_info: Option<BiosInfo>,
+    has_valid_input: bool,
+
+    bios_info_view: Controller<BiosInfoView>,
 
     input_file_dialog: gtk::FileDialog,
     output_folder_dialog: gtk::FileDialog,
     alert_dialog: gtk::AlertDialog,
 }
+
+static INFO_STATE_BROKER: MessageBroker<InfoState> = MessageBroker::new();
 
 impl Default for App {
     fn default() -> Self {
@@ -35,13 +71,19 @@ impl Default for App {
         bios_file_filter.add_suffix("bin");
         bios_file_filter.add_suffix("BIN");
 
+        let any_file_filter = gtk::FileFilter::new();
+        any_file_filter.set_name(Some("All Files"));
+        any_file_filter.add_mime_type("application/octet-stream");
+
         let filter_list = gio::ListStore::new::<gtk::FileFilter>();
         filter_list.append(&bios_file_filter);
+        filter_list.append(&any_file_filter);
 
         let select_bios_dialog = gtk::FileDialog::builder()
             .title("Select BIOS File")
             .modal(true)
             .filters(&filter_list)
+            .default_filter(&bios_file_filter)
             .build();
 
         let output_folder_dialog = gtk::FileDialog::builder()
@@ -49,13 +91,18 @@ impl Default for App {
             .modal(true)
             .build();
 
-        let alert_dialog = gtk::AlertDialog::builder()
-            .modal(true)
-            .build();
+        let alert_dialog = gtk::AlertDialog::builder().modal(true).build();
+
+        let bios_info_view = BiosInfoView::builder()
+            .launch_with_broker((), &INFO_STATE_BROKER)
+            .detach();
 
         Self {
             input_path: None,
             bios_info: None,
+            has_valid_input: false,
+
+            bios_info_view,
 
             input_file_dialog: select_bios_dialog,
             output_folder_dialog,
@@ -77,57 +124,27 @@ impl App {
         }
     }
 
-    fn format_board_name(&self) -> String {
-        match self.bios_info.as_ref() {
-            Some(bios_info) => {
-                let board_name = bios_info.get_board_name();
-                let brand = bios_info.get_brand();
-                format!("{brand} {board_name}")
-            },
-            None => String::new()
-        }
-    }
-
-    fn format_build_date(&self) -> String {
-        match self.bios_info.as_ref() {
-            Some(bios_info) => {
-                let build_date = bios_info.get_build_date();
-                format!("{build_date}")
-            },
-            None => String::new()
-        }
-    }
-
-    fn format_build_number(&self) -> String {
-        match self.bios_info.as_ref() {
-            Some(bios_info) => {
-                bios_info.get_build_number().clone()
-            },
-            None => String::new()
-        }
-    }
-
-    fn format_expected_name(&self) -> String {
-        match self.bios_info.as_ref() {
-            Some(bios_info) => {
-                bios_info.get_expected_name().clone()
-            },
-            None => String::new()
-        }
-    }
-
     fn show_alert_with_message<E: Display>(&self, msg: E, root: &impl IsA<gtk::Window>) {
         self.alert_dialog.set_message(&format!("{}", msg));
         self.alert_dialog.show(Some(root));
     }
 
-    async fn set_input_file(&mut self, root: &impl IsA<gtk::Window>) -> anyhow::Result<Option<File>> {
+    fn clear_input(&mut self) {
+        self.input_path = None;
+        self.bios_info = None;
+        self.has_valid_input = false;
+    }
+
+    async fn set_input_file(
+        &mut self,
+        root: &impl IsA<gtk::Window>,
+    ) -> anyhow::Result<Option<File>> {
         match self.input_file_dialog.open_future(Some(root)).await {
             Ok(selected_file) => {
                 let selected_path = if let Some(path) = selected_file.path() {
                     path
                 } else {
-                    self.input_path = None;
+                    self.clear_input();
                     return Err(anyhow::Error::msg("Failed to get path to selected file."));
                 };
 
@@ -136,8 +153,11 @@ impl App {
                 let selected_file = match File::open(&selected_path) {
                     Ok(file) => file,
                     Err(err) => {
-                        self.input_path = None;
-                        return Err(anyhow::Error::msg(format!("Failed to open selected file: {}", err)));
+                        self.clear_input();
+                        return Err(anyhow::Error::msg(format!(
+                            "Failed to open selected file: {}",
+                            err
+                        )));
                     }
                 };
 
@@ -145,24 +165,24 @@ impl App {
                     Ok(_) => {
                         self.input_path = Some(selected_path);
                         Ok(Some(selected_file))
-                    },
+                    }
                     Err(err) => {
-                        self.input_path = None;
+                        self.clear_input();
                         Err(anyhow::Error::msg(format!("{}", err)))
                     }
                 }
             }
             Err(_) => {
-                self.input_path = None;
+                self.clear_input();
                 Ok(None)
-            },
+            }
         }
     }
 
     async fn load_input_file(&mut self, input_file: &mut File) -> anyhow::Result<()> {
-        let bios_info = BiosInfo::from_file(input_file)?;
+        let bios_info_from_file = BiosInfo::from_file(input_file)?;
 
-        self.bios_info = Some(bios_info);
+        self.bios_info = Some(bios_info_from_file);
 
         Ok(())
     }
@@ -183,9 +203,11 @@ impl App {
         let mut input_file = input_file.unwrap();
 
         match self.load_input_file(&mut input_file).await {
-            Ok(_) => {},
+            Ok(_) => {
+                self.has_valid_input = true;
+            }
             Err(err) => {
-                self.input_path = None;
+                self.clear_input();
                 self.show_alert_with_message(err, root);
             }
         }
@@ -195,17 +217,20 @@ impl App {
         if let Some(selected_path) = self.input_path.as_ref() {
             if let Some(parent_dir) = selected_path.parent() {
                 let gio_folder = gio::File::for_path(parent_dir);
-                self.output_folder_dialog.set_initial_folder(Some(&gio_folder));
+                self.output_folder_dialog
+                    .set_initial_folder(Some(&gio_folder));
             }
         } else {
             self.show_alert_with_message("Input file must be selected.", root);
             return;
         };
 
-        let output_folder = match self.output_folder_dialog.select_folder_future(Some(root)).await {
-            Ok(selected_folder) => {
-                selected_folder.path()
-            },
+        let output_folder = match self
+            .output_folder_dialog
+            .select_folder_future(Some(root))
+            .await
+        {
+            Ok(selected_folder) => selected_folder.path(),
             Err(_) => None,
         };
 
@@ -227,7 +252,6 @@ impl App {
         }
 
         // Copy file to target directory with correct name
-
         let cap_name: String = if let Some(bios_info) = self.bios_info.as_ref() {
             bios_info.get_expected_name().clone()
         } else {
@@ -235,18 +259,25 @@ impl App {
             return;
         };
 
-        let input_path = self.input_path.as_ref().expect("Input path should be valid.").clone();
+        let input_path = self
+            .input_path
+            .as_ref()
+            .expect("Input path should be valid.")
+            .clone();
         let target_path = output_folder.join(cap_name);
 
         if input_path == target_path {
-            self.show_alert_with_message("Input and output files cannot be the same. Please choose a different location.", root);
+            self.show_alert_with_message(
+                "Input and output files cannot be the same. Please choose a different location.",
+                root,
+            );
             return;
         }
 
         match fs::copy(input_path, target_path) {
             Ok(_) => {
                 self.show_alert_with_message("File copied and renamed!", root);
-            },
+            }
             Err(err) => self.show_alert_with_message(err, root),
         }
     }
@@ -256,7 +287,7 @@ impl App {
 impl AsyncComponent for App {
     type Init = ();
     type Input = AppInput;
-    type Output = ();
+    type Output = InfoState;
     type CommandOutput = ();
 
     view! {
@@ -293,89 +324,7 @@ impl AsyncComponent for App {
                         set_orientation: gtk::Orientation::Horizontal,
                     },
 
-                    // \/ BIOS Info View \/
-                    gtk::Box {
-                        set_orientation: gtk::Orientation::Vertical,
-                        set_spacing: 8,
-                        set_margin_all: 8,
-
-                        gtk::Box {
-                            set_orientation: gtk::Orientation::Horizontal,
-                            set_spacing: 4,
-                            set_margin_all: 4,
-
-                            gtk::Label {
-                                set_label: "Board model:",
-                                set_selectable: false,
-                                set_wrap: true,
-                            },
-
-                            gtk::Label {
-                                #[watch]
-                                set_label: &model.format_board_name(),
-                                set_selectable: true,
-                                set_wrap: true,
-                            },
-                        },
-
-                        gtk::Box {
-                            set_orientation: gtk::Orientation::Horizontal,
-                            set_spacing: 4,
-                            set_margin_all: 4,
-
-                            gtk::Label {
-                                set_label: "Build date:",
-                                set_selectable: false,
-                                set_wrap: true,
-                            },
-
-                            gtk::Label {
-                                #[watch]
-                                set_label: &model.format_build_date(),
-                                set_selectable: true,
-                                set_wrap: true,
-                            },
-                        },
-
-                        gtk::Box {
-                            set_orientation: gtk::Orientation::Horizontal,
-                            set_spacing: 4,
-                            set_margin_all: 4,
-
-                            gtk::Label {
-                                set_label: "Build number:",
-                                set_selectable: false,
-                                set_wrap: true,
-                            },
-
-                            gtk::Label {
-                                #[watch]
-                                set_label: &model.format_build_number(),
-                                set_selectable: true,
-                                set_wrap: true,
-                            },
-                        },
-
-                        gtk::Box {
-                            set_orientation: gtk::Orientation::Horizontal,
-                            set_spacing: 4,
-                            set_margin_all: 4,
-
-                            gtk::Label {
-                                set_label: "Expected name:",
-                                set_selectable: false,
-                                set_wrap: true,
-                            },
-
-                            gtk::Label {
-                                #[watch]
-                                set_label: &model.format_expected_name(),
-                                set_selectable: true,
-                                set_wrap: true,
-                            },
-                        },
-                    },
-                    // /\ BIOS Info View /\
+                    append = model.bios_info_view.widget(),
 
                     gtk::Separator {
                         set_orientation: gtk::Orientation::Horizontal,
@@ -384,7 +333,7 @@ impl AsyncComponent for App {
                     #[name = "select_output_btn"]
                     gtk::Button::with_label("Copy and rename file...") {
                         #[watch]
-                        set_sensitive: model.bios_info.is_some(),
+                        set_sensitive: model.has_valid_input,
                         connect_clicked => Self::Input::CopyAndRename,
                     },
                 }
@@ -411,13 +360,14 @@ impl AsyncComponent for App {
         root: &Self::Root,
     ) {
         match message {
-            AppInput::SelectFile => self.handle_select_file(root).await,
+            AppInput::SelectFile => {
+                self.handle_select_file(root).await;
+                INFO_STATE_BROKER.send(InfoState::BiosInfoUpdated(self.bios_info.clone()));
+            }
             AppInput::CopyAndRename => self.handle_select_output_folder(root).await,
         }
     }
 }
-
-
 
 fn main() {
     let app = RelmApp::new(APP_ID);

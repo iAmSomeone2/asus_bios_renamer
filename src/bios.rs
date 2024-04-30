@@ -21,12 +21,12 @@
 // SOFTWARE.
 
 use chrono::NaiveDate;
+use std::error::Error;
+use std::fmt::{Display, Formatter};
 use std::{
     fs::File,
     io::{BufReader, ErrorKind, Read},
 };
-use std::error::Error;
-use std::fmt::{Display, Formatter};
 
 const INFO_HEADER_LEN: usize = 9;
 /// Byte array used to search for the start of the BIOS info block
@@ -66,7 +66,7 @@ const MIB_FACTOR: u64 = 1_048_576;
 const MAX_FILE_SIZE: u64 = 150 * MIB_FACTOR;
 
 /// Information describing the BIOS/EFI file as read from its info block.
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct BiosInfo {
     /// Name of target motherboard
     board_name: String,
@@ -90,8 +90,9 @@ pub struct BiosInfo {
 
 impl Display for BiosInfo {
     fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
-        write!(f,
-               "Board name: {}\nBrand: {}\nBuild date: {}\nBuild number: {}\nExpected name: {}",
+        write!(
+            f,
+            "Board name: {}\nBrand: {}\nBuild date: {}\nBuild number: {}\nExpected name: {}",
             self.board_name, self.brand, self.build_date, self.build_number, self.expected_name
         )
     }
@@ -141,11 +142,8 @@ impl BiosInfo {
             // Check if the current byte is '$'
             match reader.read_exact(&mut mini_buf) {
                 Ok(_) => {}
-                Err(err) => match err.kind() {
-                    ErrorKind::UnexpectedEof => {
-                        return None;
-                    }
-                    _ => {}
+                Err(err) => if err.kind() == ErrorKind::UnexpectedEof {
+                    return None;
                 },
             }
             if mini_buf[0] != 0x24 {
@@ -161,11 +159,8 @@ impl BiosInfo {
             // Reads 9 bytes into 'buf'. If EoF is encountered, break the loop and return 'None'
             match reader.read_exact(&mut buf) {
                 Ok(_) => {}
-                Err(err) => match err.kind() {
-                    ErrorKind::UnexpectedEof => {
-                        return None;
-                    }
-                    _ => {}
+                Err(err) => if err.kind() == ErrorKind::UnexpectedEof {
+                    return None;
                 },
             }
 
@@ -182,7 +177,7 @@ impl BiosInfo {
         // Read in raw bytes of info struct
         let mut reader = BufReader::new(bios_file);
         match BiosInfo::seek_to_bootefi_block(&mut reader) {
-            Some(_pos) => {},
+            Some(_pos) => {}
             None => {
                 return Err(std::io::Error::new(
                     ErrorKind::InvalidData,
@@ -202,8 +197,7 @@ impl BiosInfo {
         let brand = bytes_to_string(&info_chunk, BRAND_NAME_OFFSET, BRAND_NAME_LEN);
 
         let build_date = bytes_to_string(&info_chunk, DATE_OFFSET, DATE_LEN);
-        let build_date =
-            NaiveDate::parse_from_str(&build_date, "%m/%d/%Y").unwrap_or_default();
+        let build_date = NaiveDate::parse_from_str(&build_date, "%m/%d/%Y").unwrap_or_default();
 
         let build_number = bytes_to_string(&info_chunk, BUILD_NUMBER_OFFSET, BUILD_NUMBER_LEN);
         let cap_name = bytes_to_string(&info_chunk, CAP_NAME_OFFSET, CAP_NAME_LEN);
@@ -253,7 +247,10 @@ impl Display for ValidationError {
     fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
         let msg = match self {
             Self::Metadata => String::from("Failed to read file metadata."),
-            Self::FileTooLarge => format!("File exceeds maximum size ({} MiB).", MAX_FILE_SIZE / MIB_FACTOR),
+            Self::FileTooLarge => format!(
+                "File exceeds maximum size ({} MiB).",
+                MAX_FILE_SIZE / MIB_FACTOR
+            ),
             Self::NotRegularFile => String::from("Selection must be a regular file."),
         };
 
@@ -275,7 +272,9 @@ impl Error for ValidationError {}
 ///
 /// * `bios_file` - file to verify
 pub fn validate_file(bios_file: &File) -> Result<(), ValidationError> {
-    let file_info = bios_file.metadata().map_err(|_| ValidationError::Metadata)?;
+    let file_info = bios_file
+        .metadata()
+        .map_err(|_| ValidationError::Metadata)?;
     let file_size = file_info.len();
 
     if !file_info.is_file() {

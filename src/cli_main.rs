@@ -60,7 +60,6 @@ fn main() -> anyhow::Result<()> {
     // Close the file by dropping it
     drop(bios_file);
 
-
     // Handle the user setting a target directory
     let mut output_path = match cli.bios_path.parent() {
         Some(dir) => dir.to_owned(),
