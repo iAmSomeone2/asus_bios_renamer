@@ -27,6 +27,7 @@ use relm4::MessageBroker;
 use std::fmt::Display;
 use std::fs;
 use std::fs::File;
+use std::io::ErrorKind;
 use std::path::PathBuf;
 
 use crate::bios::BiosInfo;
@@ -48,10 +49,16 @@ pub enum InfoState {
     BiosInfoUpdated(Option<BiosInfo>),
 }
 
+#[derive(Debug)]
+pub enum CommandMsg {
+    LoadInputFile(Result<BiosInfo, std::io::Error>),
+}
+
 struct App {
     input_path: Option<PathBuf>,
     bios_info: Option<BiosInfo>,
     has_valid_input: bool,
+    loading: bool,
 
     bios_info_view: Controller<BiosInfoView>,
 
@@ -101,6 +108,7 @@ impl Default for App {
             input_path: None,
             bios_info: None,
             has_valid_input: false,
+            loading: false,
 
             bios_info_view,
 
@@ -179,36 +187,12 @@ impl App {
         }
     }
 
-    async fn load_input_file(&mut self, input_file: &mut File) -> anyhow::Result<()> {
-        let bios_info_from_file = BiosInfo::from_file(input_file)?;
-
-        self.bios_info = Some(bios_info_from_file);
-
-        Ok(())
-    }
-
-    async fn handle_select_file(&mut self, root: &impl IsA<gtk::Window>) {
-        let input_file = match self.set_input_file(root).await {
+    async fn handle_select_file(&mut self, root: &impl IsA<gtk::Window>) -> Option<File> {
+        match self.set_input_file(root).await {
             Ok(file) => file,
             Err(err) => {
                 self.show_alert_with_message(err, root);
-                return;
-            }
-        };
-
-        if input_file.is_none() || self.input_path.is_none() {
-            return;
-        }
-
-        let mut input_file = input_file.unwrap();
-
-        match self.load_input_file(&mut input_file).await {
-            Ok(_) => {
-                self.has_valid_input = true;
-            }
-            Err(err) => {
-                self.clear_input();
-                self.show_alert_with_message(err, root);
+                None
             }
         }
     }
@@ -288,7 +272,7 @@ impl AsyncComponent for App {
     type Init = ();
     type Input = AppInput;
     type Output = InfoState;
-    type CommandOutput = ();
+    type CommandOutput = CommandMsg;
 
     view! {
         adw::ApplicationWindow {
@@ -309,6 +293,8 @@ impl AsyncComponent for App {
                         set_margin_all: 8,
 
                         gtk::Button::with_label("Select file...") {
+                            #[watch]
+                            set_sensitive: !model.loading,
                             connect_clicked => Self::Input::SelectFile,
                         },
 
@@ -323,6 +309,7 @@ impl AsyncComponent for App {
                     gtk::Separator {
                         set_orientation: gtk::Orientation::Horizontal,
                     },
+                    // TODO: Add working progress bar
 
                     append = model.bios_info_view.widget(),
 
@@ -333,7 +320,7 @@ impl AsyncComponent for App {
                     #[name = "select_output_btn"]
                     gtk::Button::with_label("Copy and rename file...") {
                         #[watch]
-                        set_sensitive: model.has_valid_input,
+                        set_sensitive: model.has_valid_input && !model.loading,
                         connect_clicked => Self::Input::CopyAndRename,
                     },
                 }
@@ -356,15 +343,54 @@ impl AsyncComponent for App {
     async fn update(
         &mut self,
         message: Self::Input,
-        _sender: AsyncComponentSender<Self>,
+        sender: AsyncComponentSender<Self>,
         root: &Self::Root,
     ) {
         match message {
             AppInput::SelectFile => {
-                self.handle_select_file(root).await;
-                INFO_STATE_BROKER.send(InfoState::BiosInfoUpdated(self.bios_info.clone()));
+                if let Some(mut input_file) = self.handle_select_file(root).await {
+                    self.loading = true;
+                    sender.spawn_oneshot_command(move || {
+                        CommandMsg::LoadInputFile(BiosInfo::from_file(&mut input_file))
+                    });
+                }
             }
             AppInput::CopyAndRename => self.handle_select_output_folder(root).await,
+        }
+    }
+
+    async fn update_cmd(
+        &mut self,
+        message: Self::CommandOutput,
+        _sender: AsyncComponentSender<Self>,
+        root: &Self::Root,
+    ) {
+        match message {
+            CommandMsg::LoadInputFile(bios_info_result) => {
+                self.loading = false;
+                match bios_info_result {
+                    Ok(bios_info) => {
+                        self.bios_info = Some(bios_info);
+                        self.has_valid_input = true;
+                        INFO_STATE_BROKER.send(InfoState::BiosInfoUpdated(self.bios_info.clone()));
+                    }
+                    Err(err) => {
+                        if err.kind() == ErrorKind::InvalidData {
+                            self.show_alert_with_message(
+                                "Selected file does not appear to be a valid ASUS BIOS.",
+                                root,
+                            );
+                        } else {
+                            self.show_alert_with_message(
+                                format!("An error occurred while reading the file: {}", err),
+                                root,
+                            );
+                        }
+                        self.clear_input();
+                        INFO_STATE_BROKER.send(InfoState::BiosInfoUpdated(self.bios_info.clone()));
+                    }
+                }
+            }
         }
     }
 }

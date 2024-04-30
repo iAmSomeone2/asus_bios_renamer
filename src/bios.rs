@@ -142,9 +142,11 @@ impl BiosInfo {
             // Check if the current byte is '$'
             match reader.read_exact(&mut mini_buf) {
                 Ok(_) => {}
-                Err(err) => if err.kind() == ErrorKind::UnexpectedEof {
-                    return None;
-                },
+                Err(err) => {
+                    if err.kind() == ErrorKind::UnexpectedEof {
+                        return None;
+                    }
+                }
             }
             if mini_buf[0] != 0x24 {
                 // Current byte is not '$'
@@ -159,9 +161,11 @@ impl BiosInfo {
             // Reads 9 bytes into 'buf'. If EoF is encountered, break the loop and return 'None'
             match reader.read_exact(&mut buf) {
                 Ok(_) => {}
-                Err(err) => if err.kind() == ErrorKind::UnexpectedEof {
-                    return None;
-                },
+                Err(err) => {
+                    if err.kind() == ErrorKind::UnexpectedEof {
+                        return None;
+                    }
+                }
             }
 
             read_pos += INFO_HEADER_LEN;
