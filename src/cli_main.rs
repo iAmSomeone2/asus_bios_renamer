@@ -54,11 +54,7 @@ fn main() -> anyhow::Result<()> {
     let mut bios_file = File::open(&bios_path)?;
 
     // Check file validity
-    let is_valid = bios::is_file_valid(&bios_file)?;
-
-    if !is_valid {
-        return Err(anyhow::Error::msg("INVALID PATH: provided path does not point to a file"));
-    }
+    bios::validate_file(&bios_file)?;
 
     let bios_info = bios::BiosInfo::from_file(&mut bios_file)?;
     // Close the file by dropping it

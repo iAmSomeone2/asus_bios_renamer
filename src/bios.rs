@@ -25,6 +25,7 @@ use std::{
     fs::File,
     io::{BufReader, ErrorKind, Read},
 };
+use std::error::Error;
 use std::fmt::{Display, Formatter};
 
 const INFO_HEADER_LEN: usize = 9;
@@ -58,6 +59,11 @@ const BUILD_NUMBER_LEN: usize = 14;
 const CAP_NAME_OFFSET: usize = 0x88;
 /// Number of bytes reserved for the CAP file name in the info block
 const CAP_NAME_LEN: usize = 12;
+
+const MIB_FACTOR: u64 = 1_048_576;
+
+/// Maximum allowed file size (150 MiB)
+const MAX_FILE_SIZE: u64 = 150 * MIB_FACTOR;
 
 /// Information describing the BIOS/EFI file as read from its info block.
 #[derive(Debug)]
@@ -211,23 +217,74 @@ impl BiosInfo {
         })
     }
 
+    pub fn get_board_name(&self) -> &String {
+        &self.board_name
+    }
+
+    pub fn get_brand(&self) -> &String {
+        &self.brand
+    }
+
+    pub fn get_build_date(&self) -> &NaiveDate {
+        &self.build_date
+    }
+
+    pub fn get_build_number(&self) -> &String {
+        &self.build_number
+    }
+
     pub fn get_expected_name(&self) -> &String {
         &self.expected_name
     }
 }
 
-/// Returns `true` if the provided file meets known requirements
+#[derive(Debug, Eq, PartialEq)]
+/// Various errors which can cause a file to fail validation.
+pub enum ValidationError {
+    /// Failed to read file metadata
+    Metadata,
+    /// File exceeds the maximum size (150 MiB)
+    FileTooLarge,
+    /// File is a directory, symlink, etc.
+    NotRegularFile,
+}
+
+impl Display for ValidationError {
+    fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
+        let msg = match self {
+            Self::Metadata => String::from("Failed to read file metadata."),
+            Self::FileTooLarge => format!("File exceeds maximum size ({} MiB).", MAX_FILE_SIZE / MIB_FACTOR),
+            Self::NotRegularFile => String::from("Selection must be a regular file."),
+        };
+
+        write!(f, "{}", msg)
+    }
+}
+
+impl Error for ValidationError {}
+
+/// Returns `Ok(())` if the provided file meets known requirements. Otherwise, a [ValidationError] is
+/// thrown which describes the problem with the file.
 ///
 /// # Details
 ///
-/// Currently, only the expected size of the file can be checked. It is yet to be determined if
-/// these files have something like an embedded checksum and where that might be.
+/// Currently, only size of the file and if it is a regular file are checked. It is yet to be
+/// determined if these files have some embedded validation and what that might be.
 ///
 /// # Arguments
 ///
 /// * `bios_file` - file to verify
-pub fn is_file_valid(bios_file: &File) -> Result<bool, std::io::Error> {
-    let file_info = bios_file.metadata()?;
+pub fn validate_file(bios_file: &File) -> Result<(), ValidationError> {
+    let file_info = bios_file.metadata().map_err(|_| ValidationError::Metadata)?;
+    let file_size = file_info.len();
 
-    Ok(file_info.is_file())
+    if !file_info.is_file() {
+        return Err(ValidationError::NotRegularFile);
+    }
+
+    if file_size > MAX_FILE_SIZE {
+        return Err(ValidationError::FileTooLarge);
+    }
+
+    Ok(())
 }

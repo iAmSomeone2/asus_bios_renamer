@@ -13,12 +13,12 @@ categories = ["command-line-utilities"]
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 [[bin]]
 name = "rename-bios"
-path = "src/main.rs"
+path = "src/cli_main.rs"
 required-features = ["cli"]
 
 [[bin]]
 name = "rename-bios-gui"
-path = "src/gui/mod.rs"
+path = "src/gui_main.rs"
 required-features = ["gui"]
 
 [profile.release]
@@ -30,7 +30,7 @@ strip = true
 anyhow = "1.0.82"
 chrono = "0.4.38"
 clap = { version = "4.5.4", features = ["derive"], optional = true }
-relm4 = { version = "0.8.1", features = [ "libadwaita", "gnome_45"], optional = true }
+relm4 = { version = "0.8.1", features = [ "libadwaita", "gnome_46"], optional = true }
 
 [features]
 default = ["cli"]
